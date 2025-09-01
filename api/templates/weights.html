@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Recorded Weights</title>
+</head>
+<body>
+    <h1>Recorded Weights</h1>
+    <table border="1" cellpadding="5">
+        <tr>
+            <th>ID</th>
+            <th>Date</th>
+            <th>Weight (kg)</th>
+        </tr>
+        {{range .}}
+        <tr>
+            <td>{{.ID}}</td>
+            <td>{{.Date.Format "2006-01-02"}}</td>
+            <td>{{.WeightKg}}</td>
+        </tr>
+        {{end}}
+    </table>
+    <br>
+    <a href="/add">➕ Add another entry</a>
+</body>
+</html>
