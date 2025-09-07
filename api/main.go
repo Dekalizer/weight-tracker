@@ -6,7 +6,6 @@ import (
 	"html/template"
 	"log"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -18,9 +17,9 @@ var (
 )
 
 type Weight struct {
-	ID       int       `db:"id"`
-	Date     time.Time `db:"date"`
-	WeightKg float64   `db:"weight_kg"`
+	ID       int       `json:"id"`
+	Date     time.Time `json:"date"`
+	WeightKg float64   `json:"weight_kg"`
 }
 
 func main() {
@@ -42,49 +41,61 @@ func main() {
 	}
 
 	r := mux.NewRouter()
-	r.HandleFunc("/", homeHandler).Methods("GET")
-	r.HandleFunc("/add", addHandler).Methods("GET", "POST")
-	r.HandleFunc("/weights", getWeights).Methods("GET")
+	r.HandleFunc("/", homeHandler).Methods("GET", "OPTIONS")
+	r.HandleFunc("/add", addHandler).Methods("GET", "POST", "OPTIONS")
+	r.HandleFunc("/weights", weightsHandler).Methods("GET", "OPTIONS")
 
 	log.Println("Server running on :8080")
 	log.Fatal(http.ListenAndServe(":8080", r))
 }
 
 func homeHandler(w http.ResponseWriter, r *http.Request) {
+	enableCORS(w, r)
+	if r.Method == "OPTIONS" {
+		return
+	}
 	renderTemplate(w, "index.html", nil)
 }
 
 func addHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost {
-		date := r.FormValue("date")
-		weightStr := r.FormValue("weight")
+	enableCORS(w, r)
+	if r.Method == "OPTIONS" {
+		return
+	}
 
-		// Convert string to float64
-		weight, err := strconv.ParseFloat(weightStr, 64)
-		if err != nil {
-			http.Error(w, "Invalid weight value", http.StatusBadRequest)
+	if r.Method == http.MethodPost {
+		var req struct {
+			Date   string  `json:"date"`
+			Weight float64 `json:"weight"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			log.Printf("Failed to decode JSON: %v", err)
+			http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
 			return
 		}
 
-		// Insert into DB
-		_, err = db.Exec("INSERT INTO weights (date, weight_kg) VALUES ($1, $2)", date, weight)
+		log.Printf("Received weight entry: date=%s weight=%.2f", req.Date, req.Weight)
+
+		_, err := db.Exec("INSERT INTO weights (date, weight_kg) VALUES ($1, $2)", req.Date, req.Weight)
 		if err != nil {
+			log.Printf("DB insert error: %v", err)
 			http.Error(w, "Error saving weight: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		// Show success page
-		data := map[string]interface{}{
-			"Date":   date,
-			"Weight": weight,
-		}
-		renderTemplate(w, "add_success.html", data)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 		return
 	}
+
 	renderTemplate(w, "add.html", nil)
 }
 
-func getWeights(w http.ResponseWriter, r *http.Request) {
+func weightsHandler(w http.ResponseWriter, r *http.Request) {
+	enableCORS(w, r)
+	if r.Method == "OPTIONS" {
+		return
+	}
 	rows, err := db.Query("SELECT id, date, weight_kg FROM weights ORDER BY date DESC")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -103,15 +114,9 @@ func getWeights(w http.ResponseWriter, r *http.Request) {
 		weights = append(weights, wt)
 	}
 
-	// If request is JSON (API style)
-	if r.Header.Get("Accept") == "application/json" {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(weights)
-		return
-	}
-
-	// Otherwise render HTML
-	renderTemplate(w, "weights.html", weights)
+	// Always return JSON
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(weights)
 }
 
 func renderTemplate(w http.ResponseWriter, tmpl string, data interface{}) {
@@ -124,4 +129,10 @@ func renderTemplate(w http.ResponseWriter, tmpl string, data interface{}) {
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+}
+
+func enableCORS(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 }
